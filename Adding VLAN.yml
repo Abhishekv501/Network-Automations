@@ -1,0 +1,165 @@
+---
+- name: Cisco-Add vlan to access switch
+  hosts: localhost
+  gather_facts: false
+  vars_prompt:
+
+    - name: device_name
+      prompt: "Enter the device name "
+      private: no
+
+    - name: username
+      prompt: "username "
+      private: no
+
+    - name: password
+      prompt: "password "
+      private: yes
+
+    - name: vlan_number
+      prompt: "Enter the vlan number "
+      private: no
+
+    - name: vlan_name
+      prompt: "Enter the vlan name "
+      private: no
+
+  tasks:
+
+    - name: Add host
+      add_host:
+        name: "{{ device_name }}"
+        ansible_ssh_user: "{{ username }}"
+        ansible_ssh_pass: "{{ password }}"
+        ansible_become_pass: "{{ password }}"
+        ansible_connection: network_cli
+        ansible_network_os: ios
+        ansible_become: yes
+        ansible_become_method: enable
+        become_user: admin
+        group: added_hosts
+        vlan_num: "{{vlan_number}}"
+        vlan_name1: "{{vlan_name}}"
+
+
+###### L2 VLAN CREATION ################
+
+- hosts: added_hosts
+  gather_facts: false
+
+  vars:
+      success: False
+
+  tasks:
+
+    - name: configure vlan
+      ios_config:
+           lines:
+             - vlan {{vlan_num}}
+             - name {{vlan_name1}}
+      become_method: enable
+      become: yes
+
+    - name: check if vlan is configured
+      ios_command:
+        commands: "sh vlan id {{vlan_num}}"
+      register: sh_vlan
+      ignore_errors: yes
+    - debug: var=sh_vlan
+
+    - name: verify if vlan is configured
+      set_fact:
+        success: True
+      when: sh_vlan is search('{{vlan_name1}}')
+
+    - debug:
+         msg: "SOMETHING WENT WRONG !!! PLEASE CHECK THE DEVICE "
+      when: success == False
+
+    - debug:
+         msg: "Vlan is successfully configured "
+      when: success == True
+
+
+     - pause:
+         prompt: "Do you want to create a service request? (y/n)"
+       register: rb
+
+     - set_fact:
+        request: " {{ rb[\'user_input\'] }} "
+
+     - name: Abort if NO
+       fail: msg="Exited without creating service request"
+       when: 'not ("Y" in request or "y" in request or "YES" in request or "yes" in request or "Yes" in request)'
+
+
+
+- name: Create Request
+  hosts: localhost
+  connection: local
+  vars_prompt:
+    - name: CustomerWwid
+      prompt: "CustomerWwid"
+      private: no
+    - name: RequesterWwid
+      prompt: "RequesterWwid"
+      private: no
+    - name: Location
+      prompt: "Please enter exact site/building code"
+      private: no
+  tasks:
+
+    - name: Request Create
+      uri:
+        method: POST
+        status_code: 200
+        validate_certs: no
+         
+        body:
+            ServiceName: Network
+            ServiceComponentName: Local Area Network
+            CatalogItemName: Network - Activate Port
+            CustomerWwid: "{{CustomerWwid}}"
+            RequesterWwid: "{{RequesterWwid}}"
+            Location: "{{Location}}"
+            Urgency: Low
+            close: true
+            RequestParameters: [
+                {
+                    ParameterName: "LBR_location",
+                    ParameterValue: "{{Location}}"
+                },{
+                    ParameterName: "LN5A_Port_var3",
+                    ParameterValue: "No"
+                },{
+                    ParameterName: "LN5A_Port_var2",
+                    ParameterValue: ""
+                },{
+                    ParameterName: "LN5A_Port_var4",
+                    ParameterValue: ""
+                },{
+                    ParameterName: "LN5A_Port_var5",
+                    ParameterValue: "Cisco-Add vlan to access switch"
+               },{
+                    ParameterName: "common_ReqFor",
+                    ParameterValue: "{{CustomerWwid}}"
+                },{
+                    ParameterName: "LN5A_Port_var1",
+                    ParameterValue: "No"
+                },{
+                    ParameterName: "common_ReqBy",
+                    ParameterValue: "{{RequesterWwid}}"
+                }
+            ]
+        headers:
+          Accept: application/json
+        body_format: json
+      register: response
+
+    - debug:
+        msg: "{{ response }}"
+
+
+
+
+
