@@ -1,0 +1,257 @@
+---
+- name: Extreme-Create a new VLAN on an access switch
+  hosts: localhost
+  gather_facts: false
+
+  vars_prompt:  
+
+     - name: device
+       prompt: "Enter Device name "
+       private: no
+    
+     - name: vlan_number
+       prompt: "Enter VLAN ID(Ex: 125) "
+       private: no
+
+     - name: vlan_name 
+       prompt: "Enter vlan name (Ex: LABCLI-ABC-10_20_30_0) "
+       private: no
+
+     - name: priority
+       prompt: "What priority do you want to configure? Press d for default priority, p for primary and s for secondary"
+       private: no
+   
+     - name: username
+       prompt: "username "
+       private: no
+
+     - name: password
+       prompt: "password "
+       private: yes
+
+  pre_tasks:
+     - pause:
+         prompt: "Enter VLAN name again following the standard naming convention (Ex: LABCLI-ABC-10_20_30_0)"
+       when: 'not (("LABCLI" in vlan_name or "LABINF" in vlan_name or "LABINT" in vlan_name or "LABEXT" in vlan_name or "LABSED" in vlan_name or "LABMGT" in vlan_name) and ("ABC" in vlan_name or "abc" in vlan_name or "XYZ" in vlan_name))'
+       register: new_vlan_name
+
+     - name: grep user provided vlan
+       set_fact:
+         vlan_name: "{{ new_vlan_name.user_input }}"
+       when: 'not (("LABCLI" in vlan_name or "LABINF" in vlan_name or "LABINT" in vlan_name or "LABEXT" in vlan_name or "LABSED" in vlan_name or "LABMGT" in vlan_name) and ("ABC" in vlan_name or "abc" in vlan_name or "XYZ" in vlan_name))'
+
+
+     - pause:
+         prompt: "Invalid input detected, What priority do you want to configure? Please press d for default, p for primary and s for secondary"
+       when: 'not ( "d" in priority or "D" in priority or "p" in priority or "P" in priority or "S" in priority or "s" in priority )'
+       register: new_priority
+
+     - name: grep user provided priority
+       set_fact:
+         priority: "{{ new_priority.user_input }}"
+       when: 'not ( "d" in priority or "D" in priority or "p" in priority or "P" in priority or "S" in priority or "s" in priority )'
+
+
+
+  tasks:
+
+     - pause:
+         prompt: "This SOP can be used ONLY for NON-MLAG environments. Do you want to proceed with VLAN configuration? press 'enter' to continue, press 'ctrl+C' and then 'a' to abort"
+
+
+     - name: Add Host
+       add_host:
+         name: "{{ device }}"
+         ansible_ssh_user: "{{ username }}"
+         ansible_ssh_pass: "{{ password }}"
+         ansible_become_pass: "{{ password }}"
+         ansible_connection: network_cli
+         ansible_network_os: exos
+         ansible_become: yes
+         ansible_become_method: enable
+         become_user: admin
+         group: added_host
+         vlan_name1: "{{vlan_name}}"
+         vlan_num: "{{vlan_number}}"
+         priority: "{{priority}}"
+
+
+
+- hosts: added_host
+  gather_facts: false
+
+  vars:
+     stp: 's'
+     vlan: 'v'
+     dash: '-'
+     vlan_found: True
+
+  tasks:
+
+     - name: set vlan name
+       set_fact:
+         vlan_name: "{{ vlan + vlan_num + dash + vlan_name1 }}"
+     - debug: var=vlan_name
+
+     - name: set stp name
+       set_fact:
+         stp_name: "{{ stp + vlan_num + dash + vlan_name1 }}"
+     - debug: var=stp_name
+
+     - name: check if vlan already exists
+       exos_command:
+        commands: show vlan v{{vlan_num }}
+       become_method: enable
+       become: yes
+       register: sh_vlan
+       ignore_errors: yes
+     - debug: var=sh_vlan.stdout_lines
+
+     - name: verify if vlan exists
+       set_fact:
+         vlan_found: False
+       when: sh_vlan.failed == true and sh_vlan.msg is search('Invalid input detected')
+      
+     - debug:
+          msg: "VLAN ALREADY EXISTS"
+       when: vlan_found == True
+
+     - name: Abort if VLAN Exists
+       fail: msg="VLAN already exist. Exiting the code"
+       when: vlan_found == True
+
+
+     - name: configure new vlan
+       exos_config:
+          lines:
+             - create vlan {{vlan_name}}
+             - configure vlan {{vlan_name}} tag {{vlan_num}}
+             - create stpd {{stp_name}} 
+             - configure {{stp_name}} mode dot1w
+             - configure {{stp_name}} default-encapsulation pvst-plus
+             - enable {{stp_name}} auto-bind {{vlan_name}}
+             - configure {{stp_name}} tag {{vlan_num}}
+             - enable {{stp_name}}
+       become_method: enable
+       become: yes
+       when: (priority == "d" or priority == "D")
+
+     - name: configure new vlan
+       exos_config:
+          lines:
+             - create vlan {{vlan_name}}
+             - configure vlan {{vlan_name}} tag {{vlan_num}}
+             - create stpd {{stp_name}}
+             - configure {{stp_name}} mode dot1w
+             - configure {{stp_name}} default-encapsulation pvst-plus
+             - enable {{stp_name}} auto-bind {{vlan_name}}
+             - configure stpd {{stp_name}} priority 8192
+             - configure {{stp_name}} tag {{vlan_num}}
+             - enable {{stp_name}}
+       become_method: enable
+       become: yes
+       when: (priority == "p" or priority == "P")
+
+     - name: configure new vlan
+       exos_config:
+          lines:
+             - create vlan {{vlan_name}}
+             - configure vlan {{vlan_name}} tag {{vlan_num}}
+             - create stpd {{stp_name}}
+             - configure {{stp_name}} mode dot1w
+             - configure {{stp_name}} default-encapsulation pvst-plus
+             - enable {{stp_name}} auto-bind {{vlan_name}}
+             - configure stpd {{stp_name}} priority 16384
+             - configure {{stp_name}} tag {{vlan_num}}
+             - enable {{stp_name}}
+       become_method: enable
+       become: yes
+       when: (priority == "s" or priority == "S")
+
+
+
+     - debug:
+         msg: "Vlan {{vlan_name}} has been successfully configured :) "
+
+
+     - pause:
+         prompt: "Do you want to create a service request? (y/n)"
+       register: rb
+
+     - set_fact:
+        request: " {{ rb[\'user_input\'] }} "
+
+     - name: Abort if NO
+       fail: msg="Exited without creating service request"
+       when: 'not ("Y" in request or "y" in request or "YES" in request or "yes" in request or "Yes" in request)' 
+
+
+
+- name: Create Request
+  hosts: localhost
+  connection: local
+  vars_prompt:
+    - name: CustomerWwid
+      prompt: "CustomerWwid"
+      private: no
+    - name: RequesterWwid
+      prompt: "RequesterWwid"
+      private: no
+    - name: Location
+      prompt: "Please enter exact site/building code"
+      private: no
+  tasks:
+
+    - name: Request Create
+      uri:
+        method: POST
+        status_code: 200
+        validate_certs: no
+        url: "https://ansiblecode.xyz.com/SNTicketCreator/api/Request"
+        body:
+            ServiceName: Network
+            ServiceComponentName: Local Area Network
+            CatalogItemName: LAB Network 5D - Activate Port
+            CustomerWwid: "{{CustomerWwid}}"
+            RequesterWwid: "{{RequesterWwid}}"
+            Location: "{{Location}}"
+            Urgency: Low
+            close: true
+            RequestParameters: [
+                {
+                    ParameterName: "LBR_location",
+                    ParameterValue: "{{Location}}"
+                },{
+                    ParameterName: "LN5A_Port_var3",
+                    ParameterValue: "No"
+                },{
+                    ParameterName: "LN5A_Port_var2",
+                    ParameterValue: ""
+                },{
+                    ParameterName: "LN5A_Port_var4",
+                    ParameterValue: ""
+                },{
+                    ParameterName: "LN5A_Port_var5",
+                    ParameterValue: "Extreme-Create a new VLAN on an access switch"
+               },{
+                    ParameterName: "common_ReqFor",
+                    ParameterValue: "{{CustomerWwid}}"
+                },{
+                    ParameterName: "LN5A_Port_var1",
+                    ParameterValue: "No"
+                },{
+                    ParameterName: "common_ReqBy",
+                    ParameterValue: "{{RequesterWwid}}"
+                }
+            ]
+        headers:
+          Accept: application/json
+        body_format: json
+      register: response
+
+    - debug:
+        msg: "{{ response }}"
+
+
+
+
