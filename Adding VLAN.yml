@@ -114,7 +114,7 @@
         method: POST
         status_code: 200
         validate_certs: no
-         
+        url: "https://ansiblecode.xyz.com/SNTicketCreator/api/Request"
         body:
             ServiceName: Network
             ServiceComponentName: Local Area Network
