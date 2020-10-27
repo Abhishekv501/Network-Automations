@@ -1,0 +1,228 @@
+---
+- name: Cisco-Configure STP on distribution switch
+  hosts: localhost
+  gather_facts: false
+
+  vars_prompt:
+     
+     - name: primary_device
+       prompt: "Enter STP Root Switch "
+       private: no
+
+     - name: secondary_device
+       prompt: "Enter STP Secondary Root Switch "
+       private: no
+
+     - name: vlan_number
+       prompt: "Enter VLAN ID (Ex. 125) "
+       private: no
+
+     - name: username
+       prompt: "username "
+       private: no
+
+     - name: password
+       prompt: "password "
+       private: yes
+
+  tasks:
+
+     - name: Add Primary Host
+       add_host:
+         hostname: "{{ primary_device  }}"
+         ansible_ssh_user: "{{ username }}"
+         ansible_ssh_pass: "{{ password }}"
+         ansible_become_pass: "{{ password }}"
+         ansible_connection: network_cli
+         ansible_network_os: ios
+         ansible_become: yes
+         ansible_become_method: enable
+         become_user: admin
+         group: primary_device
+         vlan_num: "{{vlan_number}}"
+
+     - name: Add Secondary Host
+       add_host:
+          hostname: "{{ secondary_device  }}"
+          ansible_ssh_user: "{{ username }}"
+          ansible_ssh_pass: "{{ password }}"
+          ansible_become_pass: "{{ password }}"
+          ansible_connection: network_cli
+          ansible_network_os: ios
+          ansible_become: yes
+          ansible_become_method: enable
+          become_user: admin
+          group: secondary_device
+          vlan_num: "{{vlan_number}}"
+
+
+###################  Configuring on Root Switch ###############################
+
+- hosts: primary_device
+  gather_facts: false
+  
+  vars:
+    success1: False
+
+  tasks:
+
+     - name: configure stp settings
+       ios_config:
+            lines:
+              - spanning-tree vlan {{vlan_num}} priority 8192
+       become_method: enable
+       become: yes
+
+     - name: check if stp is properly configured
+       ios_command:
+         commands: sh spanning-tree vlan {{vlan_num}}
+       become_method: enable
+       become: yes
+       register: sh_stp
+     - debug: var=sh_stp.stdout_lines
+     - name: final check
+       set_fact:
+         success1: True
+       when: sh_stp.stdout_lines[0] is search('8192')
+
+     - debug:
+          msg: "STP is configured on device 1, let's configure stp on its pair device "
+       when: success1 == True 
+
+    #### If bridge id is not matching, it reverts the change ################
+     - debug:
+          msg: "Something went wrong! reverting the change"
+       when: success1 == False
+     - name: Backout
+       ios_config:
+           lines:
+             - no spanning-tree vlan {{vlan_num}} priority 8192
+       become_method: enable
+       become: yes
+       when: success1 == False 
+
+
+################ Configuring on Secondary Root Switch ###########################
+- hosts: secondary_device
+  gather_facts: false
+  
+  vars:
+     success2: False
+
+  tasks:
+
+     - name: configure stp settings
+       ios_config:
+         lines:
+           - spanning-tree vlan {{vlan_num}} priority 16384
+       become_method: enable
+       become: yes
+
+     - name: check if stp is properly configured
+       ios_command:
+         commands: sh spanning-tree vlan {{vlan_num}}
+       become_method: enable
+       become: yes
+       register: sh_stp
+     - debug: var=sh_stp.stdout_lines
+     - name: final check
+       set_fact:
+         success2: True
+       when: sh_stp.stdout_lines[0] is search('16384')
+
+     - debug:
+         msg: " STP for vlan {{vlan_num}} has been successfully configured :) "
+       when: success2 == True
+
+       #### If bridge id is not matching, it reverts the change ################
+     - debug:
+         msg: "Something went wrong! reverting the change"
+       when: success2 == False
+     - name: Backout
+       ios_config:
+           lines:
+             - no spanning-tree vlan {{vlan_num}} priority 16384
+       become_method: enable
+       become: yes
+       when: success2 == False
+
+     - pause:
+         prompt: "Do you want to create a service request? (y/n)"
+       register: rb
+
+     - set_fact:
+        request: " {{ rb[\'user_input\'] }} "
+
+     - name: Abort if NO
+       fail: msg="Exited without creating service request"
+       when: 'not ("Y" in request or "y" in request or "YES" in request or "yes" in request or "Yes" in request)'
+
+
+
+- name: Create Request
+  hosts: localhost
+  connection: local
+  vars_prompt:
+    - name: CustomerWwid
+      prompt: "CustomerWwid"
+      private: no
+    - name: RequesterWwid
+      prompt: "RequesterWwid"
+      private: no
+    - name: Location
+      prompt: "Please enter exact site/building code"
+      private: no
+  tasks:
+
+    - name: Request Create
+      uri:
+        method: POST
+        status_code: 200
+        validate_certs: no
+        url: "https://ansiblecode.xyz.com/SNTicketCreator/api/Request"
+        body:
+            ServiceName: Network
+            ServiceComponentName: Local Area Network
+            CatalogItemName: LAB Network 5D - Activate Port
+            CustomerWwid: "{{CustomerWwid}}"
+            RequesterWwid: "{{RequesterWwid}}"
+            Location: "{{Location}}"
+            Urgency: Low
+            close: true
+            RequestParameters: [
+                {
+                    ParameterName: "LBR_location",
+                    ParameterValue: "{{Location}}"
+                },{
+                    ParameterName: "LN5A_Port_var3",
+                    ParameterValue: "No"
+                },{
+                    ParameterName: "LN5A_Port_var2",
+                    ParameterValue: ""
+                },{
+                    ParameterName: "LN5A_Port_var4",
+                    ParameterValue: ""
+                },{
+                    ParameterName: "LN5A_Port_var5",
+                    ParameterValue: "Cisco-Configure STP on distribution switch"
+               },{
+                    ParameterName: "common_ReqFor",
+                    ParameterValue: "{{CustomerWwid}}"
+                },{
+                    ParameterName: "LN5A_Port_var1",
+                    ParameterValue: "No"
+                },{
+                    ParameterName: "common_ReqBy",
+                    ParameterValue: "{{RequesterWwid}}"
+                }
+            ]
+        headers:
+          Accept: application/json
+        body_format: json
+      register: response
+
+    - debug:
+        msg: "{{ response }}"
+
+
+
