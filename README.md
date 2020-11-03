@@ -8,3 +8,4 @@ Extreme-addition VLAN.yml - Extreme - Adding vlan to access Switch
 
 STP_Cisco.yml - Configuring STP on Cisco distribution Switches
 
+Rename_vlan.yml - Cisco - changing name of a VLAN
