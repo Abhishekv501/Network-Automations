@@ -1,0 +1,138 @@
+---
+- name: Cisco - changing name of a VLAN
+  hosts: localhost
+  gather_facts: false
+  vars_prompt:
+
+    - name: device_name
+      prompt: give device name
+      private: no
+
+    - name: username
+      prompt: username
+      private: no
+
+    - name: password
+      prompt: password
+      private: yes
+
+  tasks:
+
+    - name: Add host
+      add_host:
+        name: "{{ device_name }}"
+        ansible_ssh_user: "{{ username }}"
+        ansible_ssh_pass: "{{ password }}"
+        ansible_become_pass: "{{ password }}"
+        ansible_connection: network_cli
+        ansible_network_os: ios
+        ansible_become: yes
+        ansible_become_method: enable
+        become_user: admin
+        group: added_hosts
+
+- hosts: added_hosts
+  gather_facts: false
+  vars_prompt:
+
+    - name: vlan
+      prompt: please enter vlan id
+      private: no
+      register: vlan
+
+    - name: new_name
+      prompt: please enter new vlan name
+      private: no
+      register: new_name
+
+  tasks:
+
+    - name: check current name of the vlan
+      ios_command:
+        commands:
+          - show vlan id {{vlan}}
+      register: vlan_old_name
+    - debug: var=vlan_old_name.stdout_lines
+
+    - pause:
+        prompt: "Do you want to proceed with changing name of the vlan? press 'enter' to continue, press 'ctrl+C' and then 'a' to abort"
+
+    - name: vlan_naming
+      ios_config:
+        lines:
+          - name {{new_name}}
+        parents:
+          - vlan {{vlan}}
+
+    - name: save config
+      ios_command:
+        commands:
+          - write
+#      register: save_config
+
+    - name: post_validation
+      ios_command:
+       commands:
+         - show vlan id {{vlan}}
+      become_method: enable
+      become: yes
+      register: post_validation
+    - debug: var=post_validation.stdout_lines
+
+- name: Create Request
+  hosts: localhost
+  connection: local
+
+  vars_prompt:
+    - name: CustomerWwid
+      prompt: "CustomerWwid"
+      private: no
+    - name: RequesterWwid
+      prompt: "RequesterWwid"
+      private: no
+    - name: Location
+      prompt: "Please enter exact site/building code"
+      private: no
+  tasks:
+
+    - name: Request Create
+      ignore_errors: true
+      uri:
+        method: POST
+        status_code: 200
+        validate_certs: no
+        url: "https://ansiblecode.xyz.com/SNTicketCreator/api/Request"
+        body:
+            ServiceName: Network
+            ServiceComponentName: Local Area Network
+            CatalogItemName: Office Network Request
+            CustomerWwid: "{{CustomerWwid}}"
+            RequesterWwid: "{{RequesterWwid}}"
+            Location: "{{Location}}"
+            Urgency: Low
+            close: true
+            RequestParameters: [
+                {
+                    ParameterName: "ON_Request_var33",
+                    ParameterValue: "Cisco - changing name of a VLAN"
+                },{
+                    ParameterName: "ON_Request_var14",
+                    ParameterValue: " Wired Port "
+                },{
+                    ParameterName: "LBR_location",
+                    ParameterValue: "{{Location}}"
+                },{
+                    ParameterName: "common_ReqBy",
+                    ParameterValue: "{{CustomerWwid}}"
+                },{
+                    ParameterName: "common_ReqFor",
+                    ParameterValue: "{{RequesterWwid}}"
+                }
+            ]
+        headers:
+          Accept: application/json
+        body_format: json
+      register: response
+
+    - debug:
+        msg: "{{ response }}"
