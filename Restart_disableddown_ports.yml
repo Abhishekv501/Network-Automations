@@ -1,0 +1,131 @@
+---
+- name: Restart down/disabled port 
+  hosts: localhost
+  gather_facts: false
+  vars_prompt:
+
+    - name: device_name
+      prompt: give device name
+      private: no
+
+    - name: username
+      prompt: username
+      private: no
+
+    - name: password
+      prompt: password
+      private: yes
+
+  tasks:
+
+    - name: Add host
+      add_host:
+        name: "{{ device_name }}"
+        ansible_ssh_user: "{{ username }}"
+        ansible_ssh_pass: "{{ password }}"
+        ansible_become_pass: "{{ password }}"
+        ansible_connection: network_cli
+        ansible_network_os: ios
+        ansible_become: yes
+        ansible_become_method: enable
+        become_user: admin
+        group: added_hosts
+
+- hosts: added_hosts
+  gather_facts: false
+  vars_prompt:
+
+    - name: interface
+      prompt: interface
+      private: no
+      register: interface
+
+  tasks:
+
+    - name: Verify port is currently not in use
+      ios_command:
+        commands:
+          - show int {{interface}} status
+      register: interface_status
+    - debug: msg="{{interface_status}}"
+
+    - pause:
+        prompt: "Do you want to proceed with interface configuration? press 'enter' to continue, press 'ctrl+C' and then 'a' to abort"
+
+    - name: bounce_interface
+      ios_config:
+       lines:
+         - int {{interface}}
+         - shut
+         - no shut
+         - end
+      when: interface_status.stdout[0] is search('down') or interface_status.stdout[0] is search('disabled')
+      become_method: enable
+      become: yes
+      register: bounce_interface
+    - debug: var=bounce_interface
+
+    - name: Verify if port has come up
+      ios_command:
+        commands:
+          - show int {{interface}} status
+      register: interface_status_post_bounce
+    - debug: msg="{{interface_status_post_bounce}}"
+
+- name: Create Request
+  hosts: localhost
+  connection: local
+
+  vars_prompt:
+    - name: CustomerWwid
+      prompt: "CustomerWwid"
+      private: no
+    - name: RequesterWwid
+      prompt: "RequesterWwid"
+      private: no
+    - name: Location
+      prompt: "Please enter exact site/building code"
+      private: no
+  tasks:
+
+    - name: Request Create
+      ignore_errors: true
+      uri:
+        method: POST
+        status_code: 200
+        validate_certs: no
+        url: "https://ansiblecode.xyz.com/SNTicketCreator/api/Request"
+        body:
+            ServiceName: Network
+            ServiceComponentName: Local Area Network
+            CatalogItemName: Office Network Request
+            CustomerWwid: "{{CustomerWwid}}"
+            RequesterWwid: "{{RequesterWwid}}"
+            Location: "{{Location}}"
+            Urgency: Low
+            close: true
+            RequestParameters: [
+                {
+                    ParameterName: "ON_Request_var33",
+                    ParameterValue: "Cisco - Restart Disabled/Down Port"
+                },{
+                    ParameterName: "ON_Request_var14",
+                    ParameterValue: "Wired Port"
+                },{
+                    ParameterName: "LBR_location",
+                    ParameterValue: "{{Location}}"
+                },{
+                    ParameterName: "common_ReqBy",
+                    ParameterValue: "{{CustomerWwid}}"
+                },{
+                    ParameterName: "common_ReqFor",
+                    ParameterValue: "{{RequesterWwid}}"
+                }
+            ]
+        headers:
+          Accept: application/json
+        body_format: json
+      register: response
+
+    - debug:
+        msg: "{{ response }}"
